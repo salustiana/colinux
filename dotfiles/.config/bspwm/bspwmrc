@@ -1,0 +1,37 @@
+#! /bin/sh
+
+pgrep -x sxhkd > /dev/null || sxhkd &
+
+# Only on a cold start: after `bspc wm -r` bspwm restores the desktops itself,
+# and monitor-layout puts them back on the monitor they belong to.
+if ! bspc query -D --names | grep -qx 8; then
+	bspc monitor eDP-1 -d 8 9 0 '-' '=' 7 6
+fi
+
+bspc config border_width         2
+bspc config window_gap          12
+
+bspc config split_ratio          0.52
+bspc config borderless_monocle   true
+bspc config gapless_monocle      true
+
+# hand the desktops of a vanished screen back to the laptop panel
+bspc config remove_disabled_monitors  true
+bspc config remove_unplugged_monitors true
+
+# bspc rule -a Gimp desktop='^8' state=floating follow=on
+# bspc rule -a Chromium desktop='^2'
+# bspc rule -a mplayer2 state=floating
+# bspc rule -a Kupfer.py focus=on
+# bspc rule -a Screenkey manage=off
+
+# the bars are started by monitor-layout, one per connected screen
+
+# Put desktops 8 9 0 on the external screen while it is plugged in.  The
+# watcher applies the layout once at startup, so only call it directly when
+# the watcher is already running (a bspwm restart).
+if pgrep -f "[m]onitor-watch" > /dev/null; then
+	"$HOME/.local/bin/monitor-layout"
+else
+	"$HOME/.local/bin/monitor-watch" &
+fi

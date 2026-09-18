@@ -1,0 +1,9 @@
+#!/bin/sh
+# Rewrite packages.txt from the packages explicitly installed on this machine.
+set -eu
+repo=$(cd "$(dirname "$0")/.." && pwd)
+{
+	echo "# explicitly installed packages (pacman -Qqe); regenerate with ./bin/pkglist"
+	pacman -Qqe
+} > "$repo/packages.txt"
+git -C "$repo" --no-pager diff --stat -- packages.txt

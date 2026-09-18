@@ -1,0 +1,119 @@
+#! /bin/sh
+#
+# Arrange the displays and split the bspwm desktops between them:
+# desktops 8 9 0 live on the external screen (mounted above the laptop) while
+# it is plugged in, and fold back onto the laptop panel when it is gone.
+
+LAPTOP=eDP-1
+EXTERNAL=HDMI-1
+
+EXTERNAL_DESKTOPS='8 9 0'
+LAPTOP_DESKTOPS='- = 7 6'
+ALL_DESKTOPS='8 9 0 - = 7 6'
+
+# bspc treats any selector starting with '-' as an option, so the desktop
+# named '-' is unreachable by name.  Ids always work, and `bspc query -D` and
+# `bspc query -D --names` return the desktops in the same order.
+desktop_id() {
+	_i=1
+	for _name in $(bspc query -D --names); do
+		if [ "$_name" = "$1" ]; then
+			bspc query -D | sed -n "${_i}p"
+			return 0
+		fi
+		_i=$((_i + 1))
+	done
+	return 1
+}
+
+monitor_exists() {
+	bspc query -M --names | grep -qx "$1"
+}
+
+# RANDR changes reach bspwm asynchronously, so wait for it to catch up.
+wait_for_monitor() {
+	_n=0
+	while [ "$_n" -lt 60 ]; do
+		if monitor_exists "$1"; then return 0; fi
+		sleep 0.05
+		_n=$((_n + 1))
+	done
+	return 1
+}
+
+wait_for_monitor_gone() {
+	_n=0
+	while [ "$_n" -lt 60 ]; do
+		if ! monitor_exists "$1"; then return 0; fi
+		sleep 0.05
+		_n=$((_n + 1))
+	done
+	return 1
+}
+
+move_desktop() {
+	_id=$(desktop_id "$1") || return 1
+	bspc desktop "$_id" --to-monitor "$2"
+}
+
+# Drop the placeholder desktop bspwm creates for a monitor that would
+# otherwise have none.  Only empty, unwanted desktops are removed.
+prune_monitor() {
+	_monitor=$1
+	_wanted=$2
+	for _name in $(bspc query -D -m "$_monitor" --names); do
+		case " $_wanted " in
+			*" $_name "*) continue ;;
+		esac
+		_id=$(desktop_id "$_name") || continue
+		[ -n "$(bspc query -N -d "$_id" -n .window)" ] && continue
+		bspc desktop "$_id" --remove
+	done
+}
+
+mode=${1:-auto}
+if [ "$mode" = auto ]; then
+	if xrandr --query | grep -q "^$EXTERNAL connected"; then
+		mode=external
+	else
+		mode=laptop
+	fi
+fi
+
+case $mode in
+external)
+	xrandr --output "$LAPTOP" --auto --primary \
+	       --output "$EXTERNAL" --auto --above "$LAPTOP"
+	if wait_for_monitor "$EXTERNAL"; then
+		for desktop in $EXTERNAL_DESKTOPS; do
+			move_desktop "$desktop" "$EXTERNAL"
+		done
+		prune_monitor "$EXTERNAL" "$EXTERNAL_DESKTOPS"
+		prune_monitor "$LAPTOP" "$LAPTOP_DESKTOPS"
+		bspc monitor "$EXTERNAL" -o $EXTERNAL_DESKTOPS
+		bspc monitor "$LAPTOP" -o $LAPTOP_DESKTOPS
+		echo "external: $EXTERNAL above $LAPTOP, desktops $EXTERNAL_DESKTOPS moved over"
+	else
+		echo "bspwm never saw $EXTERNAL"
+	fi
+	;;
+laptop)
+	if monitor_exists "$EXTERNAL"; then
+		for name in $(bspc query -D -m "$EXTERNAL" --names); do
+			move_desktop "$name" "$LAPTOP"
+		done
+	fi
+	xrandr --output "$EXTERNAL" --off --output "$LAPTOP" --auto --primary
+	wait_for_monitor_gone "$EXTERNAL"
+	prune_monitor "$LAPTOP" "$ALL_DESKTOPS"
+	bspc monitor "$LAPTOP" -o $ALL_DESKTOPS
+	echo "laptop only: desktops $ALL_DESKTOPS on $LAPTOP"
+	;;
+*)
+	echo "usage: ${0##*/} [auto|external|laptop]" >&2
+	exit 1
+	;;
+esac
+
+# re-attach the bars to whatever screens are now live
+"$HOME/.local/bin/polybar-launch"

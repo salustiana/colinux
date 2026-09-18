@@ -1,0 +1,34 @@
+#! /bin/sh
+#
+# Re-apply the display layout whenever a screen is plugged in or unplugged.
+# `udevadm monitor` needs no privileges, so this lives in the X session
+# instead of a udev rule.
+
+LAYOUT="$HOME/.local/bin/monitor-layout"
+LOG="${XDG_RUNTIME_DIR:-/tmp}/monitor-layout.log"
+
+connected_outputs() {
+	xrandr --query | awk '/ connected/ { printf "%s,", $1 }'
+}
+
+apply() {
+	printf '%s  %s\n' "$(date '+%F %T')" "$1" >> "$LOG"
+	"$LAYOUT" >> "$LOG" 2>&1
+}
+
+state=$(connected_outputs)
+apply "startup ($state)"
+
+# Comparing against the last applied state debounces the burst of events a
+# single hotplug produces, and keeps our own xrandr calls from looping.
+udevadm monitor --udev --subsystem-match=drm | while read -r line; do
+	case $line in
+		UDEV*change*) ;;
+		*) continue ;;
+	esac
+	sleep 1
+	new=$(connected_outputs)
+	[ "$new" = "$state" ] && continue
+	state=$new
+	apply "hotplug ($state)"
+done

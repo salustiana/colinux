@@ -1,0 +1,33 @@
+#! /bin/sh
+#
+# Focus a desktop by name, or send the focused window to it, whichever monitor
+# currently holds it.  bspc rejects selectors starting with '-', so the name is
+# resolved to a desktop id first.
+#
+# usage: bspwm-desktop focus|send <desktop-name>
+
+action=$1
+name=$2
+
+# sxhkd keysym names, so the sxhkdrc line stays free of quoting
+case $name in
+	minus) name=- ;;
+	equal) name== ;;
+esac
+
+i=1
+for candidate in $(bspc query -D --names); do
+	if [ "$candidate" = "$name" ]; then
+		id=$(bspc query -D | sed -n "${i}p")
+		break
+	fi
+	i=$((i + 1))
+done
+
+[ -z "$id" ] && { echo "no desktop named '$name'" >&2; exit 1; }
+
+case $action in
+	focus) bspc desktop -f "$id" ;;
+	send)  bspc node -d "$id" ;;
+	*)     echo "usage: ${0##*/} focus|send <desktop-name>" >&2; exit 1 ;;
+esac

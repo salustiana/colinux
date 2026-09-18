@@ -1,0 +1,21 @@
+#! /bin/sh
+#
+# Run one bar per connected screen.  The bar section reads its output from
+# $MONITOR, so the same [bar/mybar] serves the laptop panel and the external
+# screen.
+
+BAR=mybar
+LOG=/tmp/polybar.log
+
+pkill -x polybar
+
+# wait for the old instances to let go of their IPC sockets
+n=0
+while pgrep -x polybar > /dev/null && [ "$n" -lt 60 ]; do
+	sleep 0.05
+	n=$((n + 1))
+done
+
+for output in $(xrandr --query | awk '/ connected/ { print $1 }'); do
+	MONITOR=$output setsid polybar "$BAR" >> "$LOG" 2>&1 &
+done
