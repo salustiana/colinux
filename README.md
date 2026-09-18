@@ -58,3 +58,9 @@ ssh keys, wireguard and strongswan configs, browser profiles).
 
 Inside the VM the disk shows up as `vda`.  Drop `-cdrom` and `-boot d` to boot
 the installed system afterwards.
+
+To test uncommitted changes without pushing, serve the repo from the host
+(`git update-server-info && python -m http.server 8000`) and in the VM run
+
+    RAW_BASE=http://10.0.2.2:8000 REPO_URL=http://10.0.2.2:8000/.git \
+        bash <(curl -fsSL http://10.0.2.2:8000/install.sh)

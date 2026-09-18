@@ -18,6 +18,8 @@ set -euo pipefail
 
 REPO_URL=${REPO_URL:-https://github.com/salustiana/colinux.git}
 REPO_SSH=${REPO_SSH:-git@github.com:salustiana/colinux.git}
+# raw files of the repo, for what is needed before git exists on the target
+RAW_BASE=${RAW_BASE:-https://raw.githubusercontent.com/salustiana/colinux/master}
 USERNAME=${USERNAME:-salus}
 NEW_HOSTNAME=${NEW_HOSTNAME:-}
 DISK=${DISK:-}
@@ -99,7 +101,9 @@ if [[ ${1:-} == --chroot ]]; then
 	say "dotfiles"
 	chown -R "$USERNAME:$USERNAME" "/home/$USERNAME"
 	sudo -u "$USERNAME" env HOME="/home/$USERNAME" "$repo/link.sh"
-	sudo -u "$USERNAME" git -C "$repo" remote set-url origin "$REPO_SSH"
+	if [[ -d $repo/.git ]]; then
+		sudo -u "$USERNAME" git -C "$repo" remote set-url origin "$REPO_SSH"
+	fi
 	exit 0
 fi
 
@@ -109,16 +113,20 @@ fi
 command -v pacstrap > /dev/null || die "pacstrap missing: this is meant to run from the Arch live ISO"
 curl -fsSI https://archlinux.org > /dev/null || die "no network; connect with iwctl first"
 
-# Use the checkout we are running from when there is one, otherwise clone.
+# The live ISO has no git.  Running from a checkout (e.g. on the USB stick),
+# use it; otherwise fetch only the package list now and let the new system
+# clone the repo once pacstrap has put git on it.
 src=""
 if [[ -n ${BASH_SOURCE[0]:-} ]]; then
 	here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 	[[ -f $here/packages.txt && -f $here/link.sh ]] && src=$here
 fi
-if [[ -z $src ]]; then
-	src=$(mktemp -d)
-	say "fetching $REPO_URL"
-	git clone -q "$REPO_URL" "$src"
+if [[ -n $src ]]; then
+	pkglist=$src/packages.txt
+else
+	pkglist=$(mktemp)
+	say "fetching $RAW_BASE/packages.txt"
+	curl -fsSL -o "$pkglist" "$RAW_BASE/packages.txt"
 fi
 
 if [[ -z $DISK ]]; then
@@ -158,7 +166,7 @@ ucode=""
 grep -q GenuineIntel /proc/cpuinfo && ucode=intel-ucode
 grep -q AuthenticAMD /proc/cpuinfo && ucode=amd-ucode
 
-mapfile -t PKGS < <(grep -v '^\s*#' "$src/packages.txt" | grep .)
+mapfile -t PKGS < <(grep -v '^\s*#' "$pkglist" | grep .)
 # shellcheck disable=SC2206
 PKGS+=($EXTRA_PKGS $ucode)
 
@@ -209,13 +217,13 @@ say "pacstrap (${#PKGS[@]} packages)"
 pacstrap -K /mnt "${PKGS[@]}"
 genfstab -U /mnt >> /mnt/etc/fstab
 
-say "copying repo into the new home"
-dest=/mnt/home/$USERNAME/$REPO_DIR
-mkdir -p "$(dirname "$dest")"
-if [[ -d $src/.git ]]; then
-	git clone -q "$src" "$dest"
+say "placing the repo in the new home"
+dest=/home/$USERNAME/$REPO_DIR
+mkdir -p "/mnt$(dirname "$dest")"
+if [[ -n $src ]]; then
+	cp -r "$src" "/mnt$dest"
 else
-	cp -r "$src" "$dest"
+	arch-chroot /mnt git clone -q "$REPO_URL" "$dest"
 fi
 
 # Hand the wifi networks iwd knows on the live system over to NetworkManager,
