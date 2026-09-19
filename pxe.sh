@@ -10,12 +10,13 @@
 #   sudo ./pxe.sh vm                        # add a tap for a local qemu test, prints the qemu command
 #   ./pxe.sh status
 #
-# On the target: pick "UEFI network boot" (PXE, IPv4) in the boot menu.  It
-# gets the kernel and initramfs from here, pulls the live system image over
-# HTTP, and lands in the same live environment the stick gives you, already
-# online.  Then run install.sh as usual.
+# On the target: pick "UEFI network boot" (PXE, IPv4) in the boot menu.  The
+# firmware fetches iPXE over TFTP, iPXE fetches a boot script and then the
+# kernel, initramfs and live image over HTTP, and the target lands in the same
+# live environment the stick gives you, already online.  Then run install.sh.
 #
-# Needs: dnsmasq (pacman -S dnsmasq), grub, libarchive, python, NetworkManager.
+# Needs: dnsmasq (pacman -S dnsmasq), libarchive, python, NetworkManager, and
+# iPXE: the ipxe package if installed, otherwise downloaded from ipxe.org.
 
 set -euo pipefail
 
@@ -29,12 +30,14 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 say() { printf '==> %s\n' "$*"; }
 need_root() { [[ $EUID -eq 0 ]] || die "run with sudo"; }
 
-http_pid() { [[ -f $STATE/http.pid ]] && cat "$STATE/http.pid" || true; }
-http_running() { local p; p=$(http_pid); [[ -n $p ]] && kill -0 "$p" 2> /dev/null; }
-
+# range-capable static server (the archiso hook probes the image with a Range request)
+HTTPD=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/pxe-httpd.py
+HTTP_CMD="python $HTTPD 80 $ADDR $STATE/http"
+http_pid() { pgrep -f -x "$HTTP_CMD" | head -1 || true; }
+http_running() { [[ -n $(http_pid) ]]; }
 stop_http() {
-	if http_running; then kill "$(http_pid)"; fi
-	rm -f "$STATE/http.pid"
+	pkill -f -x "$HTTP_CMD" 2> /dev/null || true
+	pkill -f -x "python -m http.server 80 --bind $ADDR" 2> /dev/null || true   # older pxe.sh
 }
 
 wired_devices() {
@@ -46,7 +49,6 @@ cmd_up() {
 	local iso=${1:-}
 	[[ -n $iso && -f $iso ]] || die "usage: pxe.sh up <archlinux.iso>"
 	command -v dnsmasq > /dev/null || die "dnsmasq missing: pacman -S dnsmasq"
-	command -v grub-mknetdir > /dev/null || die "grub missing"
 	iso=$(realpath "$iso")
 
 	mkdir -p "$STATE"
@@ -63,40 +65,48 @@ cmd_up() {
 	fi
 	[[ -f $STATE/iso/arch/x86_64/airootfs.sfs ]] || die "$iso does not look like an Arch ISO"
 
-	# ---- TFTP tree: GRUB netboot image + our menu; kernel and initramfs come
-	#      from the extracted ISO through a symlink
-	say "building TFTP tree"
-	rm -rf "$STATE/tftp"
-	grub-mknetdir --net-directory="$STATE/tftp" --subdir=/boot/grub > /dev/null
-	ln -sfn "$STATE/iso/arch" "$STATE/tftp/arch"
-	local opts="archisobasedir=arch archiso_http_srv=http://$ADDR/ ip=dhcp cms_verify=y"
-	cat > "$STATE/tftp/boot/grub/grub.cfg" <<-GRUB
-	set timeout=3
-	set default=0
+	# ---- iPXE binary: the firmware's PXE loads it, it does the rest
+	if [[ ! -f $STATE/ipxe.efi ]]; then
+		if [[ -f /usr/share/ipxe/x86_64/ipxe.efi ]]; then
+			cp /usr/share/ipxe/x86_64/ipxe.efi "$STATE/ipxe.efi"
+		else
+			say "downloading iPXE from boot.ipxe.org (or: pacman -S ipxe)"
+			curl -fsSL -o "$STATE/ipxe.efi" https://boot.ipxe.org/x86_64-efi/ipxe.efi
+		fi
+		chmod 644 "$STATE/ipxe.efi"
+	fi
 
-	# kernel + initramfs over HTTP (fast); the second entry is the fallback
-	menuentry "Arch Linux live (colinux PXE, HTTP)" {
-		insmod http
-		linux (http,$ADDR)/arch/boot/x86_64/vmlinuz-linux $opts
-		initrd (http,$ADDR)/arch/boot/x86_64/initramfs-linux.img
-	}
-	menuentry "Arch Linux live (colinux PXE, TFTP)" {
-		linux /arch/boot/x86_64/vmlinuz-linux $opts
-		initrd /arch/boot/x86_64/initramfs-linux.img
-	}
-	GRUB
-	chmod -R a+rX "$STATE/tftp"
+	# ---- TFTP: just iPXE.  HTTP: iPXE's boot script + the ISO contents
+	say "building TFTP and HTTP trees"
+	rm -rf "$STATE/tftp" "$STATE/http"
+	mkdir -p "$STATE/tftp" "$STATE/http"
+	cp "$STATE/ipxe.efi" "$STATE/tftp/ipxe.efi"
+	ln -s "$STATE/iso/arch" "$STATE/http/arch"
+	# The initramfs' DHCP client (klibc ipconfig) never gets a lease on current
+	# kernels, so iPXE hands the lease it already has to the kernel as a static
+	# address.  net.ifnames=0 keeps the interface called eth0 for that.
+	cat > "$STATE/http/boot.ipxe" <<-IPXE
+	#!ipxe
+	echo colinux: booting the Arch live system from http://$ADDR/ as \${net0/ip}
+	kernel http://$ADDR/arch/boot/x86_64/vmlinuz-linux archisobasedir=arch archiso_http_srv=http://$ADDR/ ip=\${net0/ip}:$ADDR:\${net0/gateway}:\${net0/netmask}::eth0:none net.ifnames=0 cms_verify=y
+	initrd http://$ADDR/arch/boot/x86_64/initramfs-linux.img
+	boot
+	IPXE
+	chmod -R a+rX "$STATE/tftp" "$STATE/http"
 
 	# ---- dnsmasq: NetworkManager's shared-mode instance reads this directory
 	say "writing $DROPIN"
 	mkdir -p "$(dirname "$DROPIN")"
 	cat > "$DROPIN" <<-DNSMASQ
-	# colinux PXE: hand UEFI x86_64 clients the GRUB netboot image
+	# colinux PXE.  UEFI x86_64 firmware gets iPXE over TFTP; iPXE itself
+	# (it sets DHCP option 175) gets the boot script over HTTP.
 	enable-tftp
 	tftp-root=$STATE/tftp
 	dhcp-match=set:efi64,option:client-arch,7
 	dhcp-match=set:efi64,option:client-arch,9
-	dhcp-boot=tag:efi64,boot/grub/x86_64-efi/core.efi
+	dhcp-match=set:ipxe,175
+	dhcp-boot=tag:ipxe,http://$ADDR/boot.ipxe
+	dhcp-boot=tag:!ipxe,tag:efi64,ipxe.efi
 	DNSMASQ
 
 	# ---- bridge with shared IPv4 (DHCP + NAT to whatever this laptop is on),
@@ -130,11 +140,10 @@ cmd_up() {
 		[[ $n -lt 50 ]] || die "$BR never got $ADDR (nmcli device show $BR)"
 	done
 
-	# ---- HTTP: the live system image (and kernel/initramfs for GRUB)
+	# ---- HTTP: boot script, kernel, initramfs and the live system image
 	stop_http
-	say "serving $STATE/iso over http://$ADDR/"
-	(cd "$STATE/iso" && setsid python -m http.server 80 --bind "$ADDR" \
-		> "$STATE/http.log" 2>&1 & echo $! > "$STATE/http.pid")
+	say "serving $STATE/http over http://$ADDR/"
+	setsid -f $HTTP_CMD > "$STATE/http.log" 2>&1
 	sleep 0.5
 	http_running || die "http server failed to start, see $STATE/http.log"
 
@@ -174,18 +183,18 @@ cmd_vm() {
 	nmcli con up "$BR-$TAP" > /dev/null
 	cat <<-VM
 
-	Tap $TAP is on the bridge.  As your user, boot a VM from it (an empty disk
-	makes the firmware fall through to network boot):
+	Tap $TAP is on the bridge.  Arch's OVMF firmware has no network boot
+	stack, so the VM starts iPXE directly as its kernel image; from there on
+	the path is the same as on real hardware.  As your user:
 
 	    qemu-img create -f qcow2 test.qcow2 30G
 	    qemu-system-x86_64 -enable-kvm -m 4G -smp 4 \\
 	        -drive if=pflash,format=raw,readonly=on,file=/usr/share/edk2/x64/OVMF_CODE.4m.fd \\
 	        -drive file=test.qcow2,if=virtio \\
 	        -nic tap,ifname=$TAP,script=no,downscript=no,model=virtio-net-pci \\
-	        -vga virtio -boot menu=on
+	        -kernel $STATE/ipxe.efi -vga virtio
 
-	If the firmware boots something else, press Esc at the logo and pick
-	"UEFI PXEv4".  Once installed, the same command boots the installed disk.
+	Once installed, drop the -kernel line to boot the installed disk.
 	VM
 }
 
@@ -193,6 +202,7 @@ cmd_status() {
 	echo "bridge:      $(nmcli -t -f NAME,DEVICE,STATE con show --active | grep "^$BR" || echo down)"
 	echo "dnsmasq:     $(pgrep -a dnsmasq | grep -o "$BR\|dnsmasq-shared" | head -1 || echo not running)"
 	if http_running; then echo "http:        pid $(http_pid), http://$ADDR/"; else echo "http:        not running"; fi
+	echo "tftp/http:   $(ls "$STATE/tftp" 2> /dev/null | tr '\n' ' ')/ $(ls "$STATE/http" 2> /dev/null | tr '\n' ' ')"
 	echo "iso:         $(cat "$STATE/iso.src" 2> /dev/null || echo none extracted)"
 	echo "dhcp leases:"; cat /var/lib/NetworkManager/dnsmasq-"$BR".leases 2> /dev/null | sed 's/^/    /' || true
 }

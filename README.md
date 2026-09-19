@@ -35,14 +35,17 @@ This laptop can serve the live ISO to a target PC over a direct cable.  Needs
     sudo ./pxe.sh up ~/vm/archlinux-*.iso
 
 Plug the cable into the target and boot it with UEFI network boot (PXE, IPv4).
-It gets GRUB, the kernel and the initramfs from this laptop, pulls the live
-image over HTTP, and shares this laptop's internet connection, so it lands in
-the live prompt already online.  Then run the installer one-liner as above.
-`sudo ./pxe.sh down` removes the bridge, the dnsmasq drop-in and the HTTP
-server; the extracted ISO stays in `/var/lib/colinux-pxe`.
+The target's firmware fetches iPXE from this laptop over TFTP; iPXE fetches a
+boot script, the kernel and the initramfs over HTTP, and the live system pulls
+its image the same way.  This laptop shares its internet connection over the
+cable, so the target lands in the live prompt already online.  Then run the
+installer one-liner as above.  `sudo ./pxe.sh down` removes the bridge, the
+dnsmasq drop-in and the HTTP server; the extracted ISO stays in
+`/var/lib/colinux-pxe`.
 
 The target's firmware must support UEFI network boot; the installer refuses
-BIOS-mode boots anyway.
+BIOS-mode boots anyway.  iPXE comes from the `ipxe` package when installed,
+otherwise `pxe.sh` downloads it from boot.ipxe.org once.
 
 ## Layout
 
@@ -78,7 +81,9 @@ ssh keys, wireguard and strongswan configs, browser profiles).
 Inside the VM the disk shows up as `vda`.  Drop `-cdrom` and `-boot d` to boot
 the installed system afterwards.
 
-To test the ethernet path, put a tap on the bridge and boot the VM from it:
+To test the ethernet path, put a tap on the bridge and boot the VM from it.
+Arch's OVMF build has no network boot stack, so the VM starts iPXE directly
+via `-kernel`; everything after that is identical to real hardware.
 
     sudo ./pxe.sh up ~/vm/archlinux-*.iso
     sudo ./pxe.sh vm          # prints the qemu command to run as your user
