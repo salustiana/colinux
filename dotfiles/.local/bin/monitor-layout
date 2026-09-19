@@ -1,11 +1,14 @@
 #! /bin/sh
 #
 # Arrange the displays and split the bspwm desktops between them:
-# desktops 8 9 0 live on the external screen (mounted above the laptop) while
-# it is plugged in, and fold back onto the laptop panel when it is gone.
+# desktops 8 9 0 live on the external screen (mounted above the main one)
+# while it is plugged in, and fold back onto the main screen when it is gone.
+# Which output is which comes from monitor-names, so this also works on a
+# desktop PC with a single screen.
 
-LAPTOP=eDP-1
-EXTERNAL=HDMI-1
+set -- $("$HOME/.local/bin/monitor-names")
+LAPTOP=$1
+EXTERNAL=$2
 
 EXTERNAL_DESKTOPS='8 9 0'
 LAPTOP_DESKTOPS='- = 7 6'
@@ -73,7 +76,7 @@ prune_monitor() {
 
 mode=${1:-auto}
 if [ "$mode" = auto ]; then
-	if xrandr --query | grep -q "^$EXTERNAL connected"; then
+	if [ -n "$EXTERNAL" ]; then
 		mode=external
 	else
 		mode=laptop
@@ -82,6 +85,7 @@ fi
 
 case $mode in
 external)
+	[ -n "$EXTERNAL" ] || { echo "no external screen connected" >&2; exit 1; }
 	xrandr --output "$LAPTOP" --auto --primary \
 	       --output "$EXTERNAL" --auto --above "$LAPTOP"
 	if wait_for_monitor "$EXTERNAL"; then
@@ -98,13 +102,19 @@ external)
 	fi
 	;;
 laptop)
-	if monitor_exists "$EXTERNAL"; then
-		for name in $(bspc query -D -m "$EXTERNAL" --names); do
+	# take the desktops of every other screen bspwm still knows about
+	for other in $(bspc query -M --names); do
+		[ "$other" = "$LAPTOP" ] && continue
+		for name in $(bspc query -D -m "$other" --names); do
 			move_desktop "$name" "$LAPTOP"
 		done
+	done
+	if [ -n "$EXTERNAL" ]; then
+		xrandr --output "$EXTERNAL" --off --output "$LAPTOP" --auto --primary
+		wait_for_monitor_gone "$EXTERNAL"
+	else
+		xrandr --output "$LAPTOP" --auto --primary
 	fi
-	xrandr --output "$EXTERNAL" --off --output "$LAPTOP" --auto --primary
-	wait_for_monitor_gone "$EXTERNAL"
 	prune_monitor "$LAPTOP" "$ALL_DESKTOPS"
 	bspc monitor "$LAPTOP" -o $ALL_DESKTOPS
 	echo "laptop only: desktops $ALL_DESKTOPS on $LAPTOP"

@@ -1,0 +1,23 @@
+#!/bin/sh
+#
+# Print the main screen and, when one is connected, the external screen, as
+# "MAIN EXTERNAL".  The main screen is the internal panel (eDP/LVDS/DSI) if
+# there is one, otherwise the first connected output, so the same config
+# works on a laptop and on a desktop.
+
+connected=$(xrandr --query | awk '/ connected/ { print $1 }')
+
+main=""
+for o in $connected; do
+	case $o in
+		eDP*|LVDS*|DSI*) main=$o; break ;;
+	esac
+done
+[ -z "$main" ] && main=$(printf '%s\n' "$connected" | head -n 1)
+
+external=""
+for o in $connected; do
+	if [ "$o" != "$main" ]; then external=$o; break; fi
+done
+
+echo "$main $external"

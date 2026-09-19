@@ -5,7 +5,8 @@ pgrep -x sxhkd > /dev/null || sxhkd &
 # Only on a cold start: after `bspc wm -r` bspwm restores the desktops itself,
 # and monitor-layout puts them back on the monitor they belong to.
 if ! bspc query -D --names | grep -qx 8; then
-	bspc monitor eDP-1 -d 8 9 0 '-' '=' 7 6
+	set -- $("$HOME/.local/bin/monitor-names")
+	bspc monitor "$1" -d 8 9 0 '-' '=' 7 6
 fi
 
 bspc config border_width         2
