@@ -6,6 +6,7 @@
 # Which output is which comes from monitor-names, so this also works on a
 # desktop PC with a single screen.
 
+mode=${1:-auto}
 set -- $("$HOME/.local/bin/monitor-names")
 LAPTOP=$1
 EXTERNAL=$2
@@ -74,7 +75,6 @@ prune_monitor() {
 	done
 }
 
-mode=${1:-auto}
 if [ "$mode" = auto ]; then
 	if [ -n "$EXTERNAL" ]; then
 		mode=external
