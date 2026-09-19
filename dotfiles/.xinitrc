@@ -5,5 +5,8 @@ xset r rate 200 25
 # let the systemd user session and D-Bus activated services (the desktop
 # portal, which is what tells GTK4 and Chromium to go dark) see the display
 dbus-update-activation-environment --systemd DISPLAY XAUTHORITY
+# the portal reports this key as the freedesktop color-scheme; without it
+# GTK4/libadwaita, Chromium and Firefox default to light
+gsettings set org.gnome.desktop.interface color-scheme prefer-dark
 
 exec bspwm
