@@ -47,6 +47,26 @@ The target's firmware must support UEFI network boot; the installer refuses
 BIOS-mode boots anyway.  iPXE comes from the `ipxe` package when installed,
 otherwise `pxe.sh` downloads it from boot.ipxe.org once.
 
+## Sharing this laptop's internet over the cable
+
+For a wired-only machine plugged into this laptop, a NetworkManager
+connection in *shared* mode gives it an address in 10.42.0.0/24 and routes it
+through the wifi.  One-time setup, no sudo needed:
+
+    nmcli con add type ethernet ifname enp0s31f6 con-name share \
+        ipv4.method shared ipv6.method ignore \
+        connection.autoconnect yes connection.autoconnect-priority 50
+
+It activates whenever a cable is plugged in and survives reboots.  The
+priority is below the one `pxe.sh up` uses, so the PXE bridge takes the port
+while it is up and `share` gets it back after `pxe.sh down`.  The other
+machine is reachable by its hostname (dnsmasq resolves lease names) or
+through `./pxe.sh status`-style lease listing in
+`/var/lib/NetworkManager/dnsmasq-enp0s31f6.leases`.
+
+    nmcli con down share      # stop sharing
+    nmcli con delete share    # remove it
+
 ## Layout
 
     install.sh      the installer; run from the live ISO
