@@ -122,6 +122,14 @@ cmd_up() {
 		nmcli con up "$BR-$dev" > /dev/null 2>&1 || true   # fails without carrier, joins later
 	done
 
+	# NM applies the address a moment after activation; wait for it
+	local n=0
+	until ip -4 addr show dev "$BR" | grep -q "inet $ADDR/"; do
+		sleep 0.2
+		n=$((n + 1))
+		[[ $n -lt 50 ]] || die "$BR never got $ADDR (nmcli device show $BR)"
+	done
+
 	# ---- HTTP: the live system image (and kernel/initramfs for GRUB)
 	stop_http
 	say "serving $STATE/iso over http://$ADDR/"
