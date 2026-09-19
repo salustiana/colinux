@@ -50,7 +50,8 @@ otherwise `pxe.sh` downloads it from boot.ipxe.org once.
 ## Layout
 
     install.sh      the installer; run from the live ISO
-    pxe.sh          serve the live ISO to another PC over ethernet
+    pxe.sh          serve the live ISO to another PC over ethernet (see PXE.md)
+    pxe-httpd.py    range-capable static http server used by pxe.sh
     link.sh         symlink dotfiles/ into $HOME (rerunnable)
     packages.txt    explicitly installed packages, fed to pacstrap
     bin/pkglist     regenerate packages.txt from this machine
