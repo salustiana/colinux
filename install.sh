@@ -10,9 +10,9 @@
 # install already saved), one wheel user with the dotfiles from this repo
 # linked into its home.
 #
-# Prompts: target disk, hostname, LUKS passphrase, user password, a final
-# confirmation.  Each can be preset through the environment instead:
-#   DISK=/dev/sda NEW_HOSTNAME=foo bash install.sh
+# Prompts: target disk, hostname, username, LUKS passphrase, user password, a
+# final confirmation.  Each can be preset through the environment instead:
+#   DISK=/dev/sda NEW_HOSTNAME=foo USERNAME=bar bash install.sh
 
 set -euo pipefail
 
@@ -20,7 +20,7 @@ REPO_URL=${REPO_URL:-https://github.com/salustiana/colinux.git}
 REPO_SSH=${REPO_SSH:-git@github.com:salustiana/colinux.git}
 # raw files of the repo, for what is needed before git exists on the target
 RAW_BASE=${RAW_BASE:-https://raw.githubusercontent.com/salustiana/colinux/master}
-USERNAME=${USERNAME:-salus}
+USERNAME=${USERNAME:-}
 NEW_HOSTNAME=${NEW_HOSTNAME:-}
 DISK=${DISK:-}
 TIMEZONE=${TIMEZONE:-America/Argentina/Buenos_Aires}
@@ -142,6 +142,14 @@ if [[ -z $NEW_HOSTNAME ]]; then
 	ask -p "hostname: " NEW_HOSTNAME
 fi
 [[ $NEW_HOSTNAME =~ ^[a-z0-9-]+$ ]] || die "hostname must be lowercase letters, digits, dashes"
+
+if [[ -z $USERNAME ]]; then
+	ask -p "username: " USERNAME
+fi
+# what useradd accepts by default
+[[ $USERNAME =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] ||
+	die "username must start with a lowercase letter or _, then lowercase letters, digits, _ or -, at most 32"
+[[ $USERNAME != root ]] || die "username can't be root: root is set up separately"
 
 ask_secret() {
 	local prompt=$1 a b

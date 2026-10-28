@@ -11,13 +11,13 @@ an installer that brings a fresh machine to it from the official Arch ISO.
 
        bash <(curl -fsSL https://raw.githubusercontent.com/salustiana/colinux/master/install.sh)
 
-4. Answer the prompts: disk, hostname, LUKS passphrase, user password, and a
-   final confirmation.  Then wait.
+4. Answer the prompts: disk, hostname, username, LUKS passphrase, user
+   password, and a final confirmation.  Then wait.
 5. Remove the stick, reboot, log in, `startx`.  Run `:PlugInstall` once in nvim.
 
 The result mirrors the current machine: GPT with a 2G EFI partition and a
 LUKS2 root (ext4), systemd initramfs with `sd-encrypt`, GRUB, NetworkManager,
-user `salus` in `wheel` and `video`, and the dotfiles below linked into the
+the user you name in `wheel` and `video`, and the dotfiles below linked into the
 home.  The wifi network used during the install is carried over to
 NetworkManager so the new machine is online at first boot.  Root gets the same
 password as the user.
