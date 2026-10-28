@@ -103,18 +103,24 @@ external)
 	;;
 laptop)
 	# take the desktops of every other screen bspwm still knows about
-	for other in $(bspc query -M --names); do
-		[ "$other" = "$LAPTOP" ] && continue
+	others=$(bspc query -M --names | grep -vx "$LAPTOP")
+	for other in $others; do
 		for name in $(bspc query -D -m "$other" --names); do
 			move_desktop "$name" "$LAPTOP"
 		done
 	done
-	if [ -n "$EXTERNAL" ]; then
-		xrandr --output "$EXTERNAL" --off --output "$LAPTOP" --auto --primary
-		wait_for_monitor_gone "$EXTERNAL"
-	else
-		xrandr --output "$LAPTOP" --auto --primary
-	fi
+	# turn off every other output, not just $EXTERNAL: once the cable is
+	# pulled, monitor-names no longer sees it, but xrandr may still have it
+	# enabled and bspwm would keep its monitor
+	off=""
+	for output in $(xrandr --query | awk '/^[^ ]+ (dis)?connected/ { print $1 }'); do
+		[ "$output" = "$LAPTOP" ] && continue
+		off="$off --output $output --off"
+	done
+	xrandr $off --output "$LAPTOP" --auto --primary
+	for other in $others; do
+		wait_for_monitor_gone "$other"
+	done
 	prune_monitor "$LAPTOP" "$ALL_DESKTOPS"
 	bspc monitor "$LAPTOP" -o $ALL_DESKTOPS
 	echo "laptop only: desktops $ALL_DESKTOPS on $LAPTOP"
